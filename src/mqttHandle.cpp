@@ -155,9 +155,9 @@ void kirimKeRemote(String type, uint8_t nomer, String cmd, String msg)
     mqttClient.publish(topic_id.c_str(), 0, true, msg.c_str());
   }  
   String ble_msg = topic_id;
-  ble_msg += ';';
+  ble_msg += '@';
   ble_msg += msg;
-  ble_msg += ";";
+  ble_msg += "@";
   kirimBluethooth(ble_msg);
 }
 void onMqttDisconnect(AsyncMqttClientDisconnectReason reason)

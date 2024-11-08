@@ -1,4 +1,4 @@
-#define USE_NTP
+//#define USE_NTP
 
 // #include <SPI.h>
 #ifndef USE_NTP
