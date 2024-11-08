@@ -1,41 +1,72 @@
-// #include <SPI.h>
-#include <RTClib.h>
-#include <timeHandle.h>
-
 #define USE_NTP
 
+// #include <SPI.h>
+#ifndef USE_NTP
+#include <RTClib.h>
+#endif
+#include <Arduino.h>
+#include <timeHandle.h>
+#include <NTPClient.h>
+#include <WiFiUdp.h>
+#include <mqttHandle.h>
+
 // RTC_DS1307 rtc;
+#ifndef USE_NTP
 RTC_DS3231 rtc;
 
-// #define USE_NTP
+DateTime now;
+#endif
 
 uint8_t lastMenit = 0;
 uint8_t lastJam = 0;
 uint8_t jamNow = 0;
 uint8_t menitNow = 0;
-uint8_t th,bl,tgl,dtk;
+uint8_t th, bl, tgl, dtk;
 uint8_t hariNow = 0;
 unsigned long time_delay = 0;
 uint8_t updateSync_count = 0;
 // bool siramStatus = false;
 
 String timeNow = "";
-DateTime now;
+
 
 bool timeIsUpdate = false;
 
-// WiFiUDP ntpUDP;
-// NTPClient timeClient(ntpUDP, "pool.ntp.org", 25200, 60000);
+WiFiUDP ntpUDP;
+NTPClient timeClient(ntpUDP, "pool.ntp.org", 25200, 60000);
 
 char daysOfTheWeek[7][12] = {"Minggu", "Senin", "Selasa", "Rabo", "Kamis", "Jumat", "Sabtu"};
+
+void ntp_init()
+{
+  timeClient.begin();
+  Serial.println("NTP init");
+}
+
+void ntp_sync()
+{
+  if (getWifi_sts())
+  {
+
+    timeClient.update();
+    // cek update tiap 10 menit
+    unsigned long unix_epoch = timeClient.getEpochTime(); // Get epoch time
+    Serial.println("Sync Time");
+    #ifndef USE_NTP
+    rtc.adjust(unix_epoch);
+    #endif
+  }
+  else
+  {
+    Serial.println("Synctime gagal tidak tersambung ke internet");
+  }
+}
 
 void time_init()
 {
 
   Serial.println("time init");
-
-  // Wire.begin(SDA,SCL);
-
+  #ifndef USE_NTP
   Wire.begin();
   if (!rtc.begin())
   {
@@ -53,58 +84,98 @@ void time_init()
     // January 21, 2014 at 3am you would call:
     // rtc.adjust(DateTime(2014, 1, 21, 3, 0, 0));
   }
+  #endif
 
-  // rtcTimer.attach(20, time_update);
 }
 
 void time_set(byte second, byte minute, byte hour, byte dayOfWeek, byte dayOfMonth, byte month, byte year)
 {
   // January 21, 2014 at 3am you would call:
 
+#ifndef USE_NTP
   rtc.adjust(DateTime(year, month, dayOfMonth, hour, minute, second));
+  #endif
 }
 
-uint8_t getJam(){
+uint8_t getJam()
+{
   return jamNow;
 }
 
-uint8_t getMenit(){
+uint8_t getMenit()
+{
   return menitNow;
 }
 
-uint8_t getTahun(){
+uint8_t getTahun()
+{
   return th;
 }
 
-uint8_t getTgl(){
+uint8_t getTgl()
+{
   return tgl;
-
 }
-uint8_t getBl(){
+uint8_t getBl()
+{
   return bl;
 }
 
-uint8_t getDtk(){
+uint8_t getDtk()
+{
   return dtk;
 }
 
-bool isTimeUpdate(){
+bool isTimeUpdate()
+{
   return timeIsUpdate;
 }
 
-void setTimeUpdate(bool sts){
+void setTimeUpdate(bool sts)
+{
   timeIsUpdate = sts;
 }
 
 void time_update()
 {
+  #ifdef USE_NTP
+
+  timeClient.update(); 
+  
+
+  if (lastMenit != timeClient.getMinutes())
+  {
+    timeNow = timeClient.getFormattedTime();
+    Serial.println(timeNow);    
+
+    lastMenit = timeClient.getMinutes(); // cek setiap menit saja
+    jamNow = timeClient.getHours();
+    hariNow = timeClient.getDay();
+    menitNow = lastMenit; 
+    dtk = timeClient.getSeconds();   
+    
+  }
+
+
+  #else
+
 
   now = rtc.now();
+ 
   dtk = now.second();
 
   if (lastMenit != now.minute())
   {
     timeIsUpdate = true;
+    lastMenit = now.minute(); // cek setiap menit saja
+   
+    if (++updateSync_count > 10)
+    {
+      updateSync_count = 0;
+      ntp_sync();
+    }
+   
+
     timeNow = String(now.year());
     timeNow += "-";
     if (now.month() < 10)
@@ -129,7 +200,6 @@ void time_update()
 
     Serial.println(timeNow);
 
-    lastMenit = now.minute(); // cek setiap menit saja
     jamNow = now.hour();
     hariNow = now.dayOfTheWeek();
     th = (now.year() - 2000);
@@ -138,6 +208,7 @@ void time_update()
 
     menitNow = lastMenit;
   }
+   #endif
 }
 
 void time_loop()

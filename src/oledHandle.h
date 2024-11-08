@@ -3,5 +3,6 @@
 
 void oled_init();
 void oled_loop();
+void updateDisplay();
 
 #endif

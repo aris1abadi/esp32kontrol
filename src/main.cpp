@@ -90,12 +90,23 @@
 #include <timeHandle.h>
 #include <oledHandle.h>
 #include <nodeHandle.h>
+#include <kontrolHandle.h>
+#include <mqttHandle.h>
+#include <bluethootHandle.h>
+#include <eepromHandle.h>
+
+void before(){
+	loadTask();
+}
 
 void setup()
 {
 	time_init();
 	oled_init();
-	loadDefault();
+	//loadDefault();
+	
+	mqtt_init();
+	bluethooth_init();
 	// Setup locally attached sensors
 }
 
@@ -108,4 +119,7 @@ void loop()
 {
 	time_loop();
 	oled_loop();
+	kontrol_loop();
+	mqtt_loop();
+	bluethooth_loop();
 }

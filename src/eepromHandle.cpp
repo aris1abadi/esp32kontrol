@@ -1,1019 +1,557 @@
 #include <Arduino.h>
 #include <EEPROM.h>
 #include <nodeHandle.h>
+#include <eepromHandle.h>
+#include <kontrolHandle.h>
+/*
+alokasi aktuator pada eeprom 22 byte per node
+1-10 aktuator(tiap node punya 2 relay )
 
-// allokasi 25 byte aktuator dan 20 byte untuk sensor
-#define EE_NODE1 1000
-#define EE_NODE2 1030
-#define EE_NODE3 1060
-#define EE_NODE4 1090
-#define EE_NODE5 1120
-#define EE_NODE6 1150
-#define EE_NODE7 1180
-#define EE_NODE8 1210
+51 - 100 sensor
+*/
 
-#define EE_SENSOR1 1500
-#define EE_SENSOR2 1530
-#define EE_SENSOR3 1560
+#define DEBUG_EEPROM
 
-extern Aktuator aktuator1;
-extern Aktuator aktuator2;
-extern Aktuator aktuator3;
-extern Aktuator aktuator4;
-extern Aktuator aktuator5;
-extern Aktuator aktuator6;
-extern Aktuator aktuator7;
-extern Aktuator aktuator8;
+#define EE_READY_CODE 1000
+#define EE_TASK_LEN 1001
+#define EE_TASK_START 1002
 
-extern Sensor sensor1;
-extern Sensor sensor2;
-extern Sensor sensor3;
-extern Sensor sensor4;
-extern Sensor sensor5;
-extern Sensor sensor6;
-extern Sensor sensor7;
-extern Sensor sensor8;
+#define MEM_TASK_USE 102 //  total 54byte terpakai
 
-uint8_t data[30];
-unsigned int addr = 1000;
+#define MEM_AKTUATOR_USE1 1
+#define MEM_AKTUATOR_USE2 2
+#define MEM_SENSOR_USE1 18
+#define MEM_SENSOR_USE2 19
+#define MEM_SENSOR_USE1_TYPE 20
+#define MEM_SENSOR_USE2_TYPE 21
+#define MEM_TARGET_BAWAH 22
+#define MEM_TARGET_ATAS 23
+#define MEM_INVERSE_MODE 24
+
+#define MEM_AKTUATOR_MIXA 41
+#define MEM_AKTUATOR_MIXB 42
+#define MEM_AKTUATOR_MIXC 43
+#define MEM_AKTUATOR_MIXADUK 44
+#define MEM_AKTUATOR_MIXOUT 45
+#define MEM_FLOW_SENSORA 46
+#define MEM_FLOW_SENSORB 47
+#define MEM_FLOW_SENSORC 48
+#define MEM_FLOW_MIXOUT 49
+#define MEM_TARGET_MIXA 50
+#define MEM_TARGET_MIXB 51
+#define MEM_TARGET_MIXC 52
+#define MEM_TARGET_MIXOUT 53
+#define MEM_MIXA_NAMA 54
+#define MEM_MIXB_NAMA 71
+#define MEM_MIXC_NAMA 87
+
+
+/*
+format penyimpanan task di EEPROM 54byte total
+
+    uint8_t enable;             1byte
+    uint8_t aktuatorUse1;       1byte
+    uint8_t aktuatorUse2;       1byte
+    uint8_t status;
+    uint8_t durasiCount;
+    uint8_t jadwalAktif;
+    String jadwal;              15byte
+    uint8_t sensorUse1;         1byte
+    uint8_t sensorUse2;         1byte
+    uint8_t sensorUse1Type;     1byte
+    uint8_t sensorUse2Type;     1byte
+    uint8_t targetBawah;        1byte
+    uint8_t targetAtas;         1byte
+    uint8_t inverseMode;        1byte
+    String nama;                16byte
+    float nowValue;
+    float lastValue;
+    //untuk task mi
+    uint8_t aktuatorMixA;       1byte
+    uint8_t aktuatorMixB;       1byte
+    uint8_t aktuatorMixC;       1byte
+    uint8_t aktuatorAduk;       1byte
+    uint8_t aktuatorMixOut;     1byte
+
+    uint8_t flowSensorA;        1byte
+    uint8_t flowSensorB ;       1byte
+    uint8_t flowSensorC;        1byte
+    uint8_t flowMixOut;         1byte
+
+    uint8_t targetMixA;         1byte
+    uint8_t targetMixAStatus;
+
+    uint8_t targetMixB;         1byte
+    uint8_t targetMixBStatus;
+
+    uint8_t targetMixC;         1byte
+    uint8_t targetMixCStatus;
+
+    uint8_t mixingCount ;
+    uint8_t mixingTarget;       1byte
+
+
+*/
+extern myTask dataTask[];
+extern myTask defaultTask[];
+extern int dataTaskLen;
+
+uint8_t ee_data[120];
+
 uint8_t i = 0;
 int kal = 0;
+String nm = "";
 
-void simpanNode(uint8_t node)
+void loadTask()
 {
-    switch (node)
+
+    uint8_t ee_test = EEPROM.read(EE_READY_CODE);
+    if (ee_test == 0xAA)
     {
-    case 1:
-        data[0] = aktuator1.nodeId;
-        data[1] = aktuator1.childId;
-        data[2] = aktuator1.status;
-        data[3] = aktuator1.val;
-        data[4] = aktuator1.timeOut;
-        data[5] = aktuator1.sensorUseId;
-        data[6] = aktuator1.sensorUseChildId;
-        data[7] = aktuator1.triggerMin;
-        data[8] = aktuator1.triggerMax;
-        // jadwal
-        for (i = 0; i < 10; i++)
+        Serial.println("load data Task dari eeprom");
+        // load jml task
+        uint8_t jmlTask = EEPROM.read(EE_TASK_LEN);
+        Serial.print("Jumlah task: ");
+        Serial.println(jmlTask);
+        for (int j = 0; j < jmlTask; j++)
         {
-            data[9 + i] = aktuator1.jadwal[i];
-        }
-        // last update
-        for (i = 0; i < 6; i++)
-        {
-            data[19 + i] = aktuator1.lastUpdate[i];
-        }
+            // load eeprom
+            for (int i = 0; i < MEM_TASK_USE; i++)
+            {
+                ee_data[i] = EEPROM.read(EE_TASK_START + (j * MEM_TASK_USE) + i);
+            }
+            dataTask[j].enable = ee_data[0];
+            dataTask[j].aktuatorUse1 = ee_data[1];
+            dataTask[j].aktuatorUse2 = ee_data[2];
+            //dataTask[j].jadwal = "";
+            String jw ="";
+            for (int a = 0; a < 15; a++)
+            {
+                if(a > 0){
+                    jw += ',';
+                }
+                jw += char(ee_data[3 + a]);
 
-        break;
+            }
+            dataTask[j].jadwal = String(jw);
 
-    case 2:
-        data[0] = aktuator2.nodeId;
-        data[1] = aktuator2.childId;
-        data[2] = aktuator2.status;
-        data[3] = aktuator2.val;
-        data[4] = aktuator2.timeOut;
-        data[5] = aktuator2.sensorUseId;
-        data[6] = aktuator2.sensorUseChildId;
-        data[7] = aktuator2.triggerMin;
-        data[8] = aktuator2.triggerMax;
-        // jadwal
-        for (i = 0; i < 10; i++)
-        {
-            data[9 + i] = aktuator2.jadwal[i];
-        }
-        // last update
-        for (i = 0; i < 6; i++)
-        {
-            data[19 + i] = aktuator2.lastUpdate[i];
-        }
+            dataTask[j].sensorUse1 = ee_data[18];
+            dataTask[j].sensorUse2 = ee_data[19];
+            dataTask[j].sensorUse1Type = ee_data[20];
+            dataTask[j].sensorUse2Type = ee_data[21];
+            dataTask[j].targetBawah = ee_data[22];
+            dataTask[j].targetAtas = ee_data[23];
+            dataTask[j].inverseMode = ee_data[24];
+            
+            String nm = "";
+            char nmTes ;
+            for (int b = 0; b < 16; b++)
+            {
+                
+                nmTes = char(ee_data[25 + b]);
+                if(nmTes != NULL){
+                    nm += nmTes;
+                }
+            }
 
-        break;
+            nm.replace(" ","");
+            dataTask[j].nama = nm;
+            //dataTask[j].nama.trim();
+            dataTask[j].aktuatorMixA = ee_data[41];
+            dataTask[j].aktuatorMixB = ee_data[42];
+            dataTask[j].aktuatorMixC = ee_data[43];
+            dataTask[j].aktuatorAduk = ee_data[44];
+            dataTask[j].aktuatorMixOut = ee_data[45];
+            dataTask[j].flowSensorA = ee_data[46];
+            dataTask[j].flowSensorB = ee_data[47];
+            dataTask[j].flowSensorC = ee_data[48];
+            dataTask[j].flowMixOut = ee_data[49];
+            dataTask[j].targetMixA = ee_data[50];
+            dataTask[j].targetMixB = ee_data[51];
+            dataTask[j].targetMixC = ee_data[52];
+            dataTask[j].mixingTarget = ee_data[53];
+            //nama mix A
+            nm = "";            
+            for (int b = 0; b < 16; b++)
+            {
+                
+                nmTes = char(ee_data[54 + b]);
+                if(nmTes != NULL){
+                    nm += nmTes;
+                }
+            }
 
-    case 3:
-        data[0] = aktuator3.nodeId;
-        data[1] = aktuator3.childId;
-        data[2] = aktuator3.status;
-        data[3] = aktuator3.val;
-        data[4] = aktuator3.timeOut;
-        data[5] = aktuator3.sensorUseId;
-        data[6] = aktuator3.sensorUseChildId;
-        data[7] = aktuator3.triggerMin;
-        data[8] = aktuator3.triggerMax;
-        // jadwal
-        for (i = 0; i < 10; i++)
-        {
-            data[9 + i] = aktuator3.jadwal[i];
-        }
-        // last update
-        for (i = 0; i < 6; i++)
-        {
-            data[19 + i] = aktuator3.lastUpdate[i];
-        }
+            nm.replace(" ","");
+            dataTask[j].mixAnama = nm;
 
-        break;
+            
+            //nama mix B
+            nm = "";            
+            for (int b = 0; b < 16; b++)
+            {
+                
+                nmTes = char(ee_data[71 + b]);
+                if(nmTes != NULL){
+                    nm += nmTes;
+                }
+            }
 
-    case 4:
-        data[0] = aktuator4.nodeId;
-        data[1] = aktuator4.childId;
-        data[2] = aktuator4.status;
-        data[3] = aktuator4.val;
-        data[4] = aktuator4.timeOut;
-        data[5] = aktuator4.sensorUseId;
-        data[6] = aktuator4.sensorUseChildId;
-        data[7] = aktuator4.triggerMin;
-        data[8] = aktuator4.triggerMax;
-        // jadwal
-        for (i = 0; i < 10; i++)
-        {
-            data[9 + i] = aktuator4.jadwal[i];
-        }
-        // last update
-        for (i = 0; i < 6; i++)
-        {
-            data[19 + i] = aktuator4.lastUpdate[i];
-        }
+            nm.replace(" ","");
+            dataTask[j].mixBnama = nm;
 
-        break;
+            //nama mix C
+            nm = "";            
+            for (int b = 0; b < 16; b++)
+            {
+                
+                nmTes = char(ee_data[87 + b]);
+                if(nmTes != NULL){
+                    nm += nmTes;
+                }
+            }
 
-    case 5:
-        data[0] = aktuator5.nodeId;
-        data[1] = aktuator5.childId;
-        data[2] = aktuator5.status;
-        data[3] = aktuator5.val;
-        data[4] = aktuator5.timeOut;
-        data[5] = aktuator5.sensorUseId;
-        data[6] = aktuator5.sensorUseChildId;
-        data[7] = aktuator5.triggerMin;
-        data[8] = aktuator5.triggerMax;
-        // jadwal
-        for (i = 0; i < 10; i++)
-        {
-            data[9 + i] = aktuator5.jadwal[i];
-        }
-        // last update
-        for (i = 0; i < 6; i++)
-        {
-            data[19 + i] = aktuator5.lastUpdate[i];
-        }
+            nm.replace(" ","");
+            dataTask[j].mixCnama = nm;
+            
 
-        break;
-
-    case 6:
-        data[0] = aktuator6.nodeId;
-        data[1] = aktuator6.childId;
-        data[2] = aktuator6.status;
-        data[3] = aktuator6.val;
-        data[4] = aktuator6.timeOut;
-        data[5] = aktuator6.sensorUseId;
-        data[6] = aktuator6.sensorUseChildId;
-        data[7] = aktuator6.triggerMin;
-        data[8] = aktuator6.triggerMax;
-        // jadwal
-        for (i = 0; i < 10; i++)
-        {
-            data[9 + i] = aktuator6.jadwal[i];
         }
-        // last update
-        for (i = 0; i < 6; i++)
-        {
-            data[19 + i] = aktuator6.lastUpdate[i];
-        }
-
-        break;
-
-    case 7:
-        data[0] = aktuator7.nodeId;
-        data[1] = aktuator7.childId;
-        data[2] = aktuator7.status;
-        data[3] = aktuator7.val;
-        data[4] = aktuator7.timeOut;
-        data[5] = aktuator7.sensorUseId;
-        data[6] = aktuator7.sensorUseChildId;
-        data[7] = aktuator7.triggerMin;
-        data[8] = aktuator7.triggerMax;
-        // jadwal
-        for (i = 0; i < 10; i++)
-        {
-            data[9 + i] = aktuator7.jadwal[i];
-        }
-        // last update
-        for (i = 0; i < 6; i++)
-        {
-            data[19 + i] = aktuator7.lastUpdate[i];
-        }
-
-        break;
-
-    case 8:
-        data[0] = aktuator8.nodeId;
-        data[1] = aktuator8.childId;
-        data[2] = aktuator8.status;
-        data[3] = aktuator8.val;
-        data[4] = aktuator8.timeOut;
-        data[5] = aktuator8.sensorUseId;
-        data[6] = aktuator8.sensorUseChildId;
-        data[7] = aktuator8.triggerMin;
-        data[8] = aktuator8.triggerMax;
-        // jadwal
-        for (i = 0; i < 10; i++)
-        {
-            data[9 + i] = aktuator8.jadwal[i];
-        }
-        // last update
-        for (i = 0; i < 6; i++)
-        {
-            data[19 + i] = aktuator8.lastUpdate[i];
-        }
-
-        break;
     }
-    addr = ((node - 1) * 30) + 1000;
-    for (i = 0; i < 25; i++)
+    else
     {
-        EEPROM.write(addr + i, data[i]);
+       simpanDefaultEEPROM();
+    }
+}
+
+void simpanDefaultEEPROM(){
+     // isi eeprom dengan default
+        for (int j = 0; j < dataTaskLen; j++)
+        {
+            EEPROM.write((EE_TASK_START + (MEM_TASK_USE * j)), defaultTask[j].enable);
+            EEPROM.write((EE_TASK_START + (MEM_TASK_USE * j) + MEM_AKTUATOR_USE1), defaultTask[j].aktuatorUse1);
+            EEPROM.write((EE_TASK_START + (MEM_TASK_USE * j) + MEM_AKTUATOR_USE2), defaultTask[j].aktuatorUse2);
+
+            for (int a = 0; a < 15; a++)
+            {
+                EEPROM.write((EE_TASK_START + (MEM_TASK_USE * j) + 3 + a), '0');
+            }
+
+            EEPROM.write((EE_TASK_START + (MEM_TASK_USE * j) + 18), defaultTask[j].sensorUse1);
+            EEPROM.write((EE_TASK_START + (MEM_TASK_USE * j) + 19), defaultTask[j].sensorUse2);
+            EEPROM.write((EE_TASK_START + (MEM_TASK_USE * j) + 20), defaultTask[j].sensorUse1Type);
+            EEPROM.write((EE_TASK_START + (MEM_TASK_USE * j) + 21), defaultTask[j].sensorUse2Type);
+            EEPROM.write((EE_TASK_START + (MEM_TASK_USE * j) + 22), defaultTask[j].targetBawah);
+            EEPROM.write((EE_TASK_START + (MEM_TASK_USE * j) + 23), defaultTask[j].targetAtas);
+            EEPROM.write((EE_TASK_START + (MEM_TASK_USE * j) + 24), defaultTask[j].inverseMode);
+            
+            for (int b = 0; b < 16; b++)
+            {
+                EEPROM.write((EE_TASK_START + (MEM_TASK_USE * j) + 25 + b), defaultTask[j].nama.charAt(b));
+            }
+
+            EEPROM.write((EE_TASK_START + (MEM_TASK_USE * j) + 41), defaultTask[j].aktuatorMixA);
+            EEPROM.write((EE_TASK_START + (MEM_TASK_USE * j) + 42), defaultTask[j].aktuatorMixB);
+            EEPROM.write((EE_TASK_START + (MEM_TASK_USE * j) + 43), defaultTask[j].aktuatorMixC);
+            EEPROM.write((EE_TASK_START + (MEM_TASK_USE * j) + 44), defaultTask[j].aktuatorAduk);
+            EEPROM.write((EE_TASK_START + (MEM_TASK_USE * j) + 45), defaultTask[j].aktuatorMixOut);
+            EEPROM.write((EE_TASK_START + (MEM_TASK_USE * j) + 46), defaultTask[j].flowSensorA);
+            EEPROM.write((EE_TASK_START + (MEM_TASK_USE * j) + 47), defaultTask[j].flowSensorB);
+            EEPROM.write((EE_TASK_START + (MEM_TASK_USE * j) + 48), defaultTask[j].flowSensorC);
+            EEPROM.write((EE_TASK_START + (MEM_TASK_USE * j) + 49), defaultTask[j].flowMixOut);
+            EEPROM.write((EE_TASK_START + (MEM_TASK_USE * j) + 50), defaultTask[j].targetMixA);
+            EEPROM.write((EE_TASK_START + (MEM_TASK_USE * j) + 51), defaultTask[j].targetMixB);
+            EEPROM.write((EE_TASK_START + (MEM_TASK_USE * j) + 52), defaultTask[j].targetMixC);
+            EEPROM.write((EE_TASK_START + (MEM_TASK_USE * j) + 53), defaultTask[j].mixingTarget);
+            for (int b = 0; b < 16; b++)
+            {
+                EEPROM.write((EE_TASK_START + (MEM_TASK_USE * j) + 54 + b), defaultTask[j].mixAnama.charAt(b));
+            }
+            for (int b = 0; b < 16; b++)
+            {
+                EEPROM.write((EE_TASK_START + (MEM_TASK_USE * j) + 71 + b), defaultTask[j].mixBnama.charAt(b));
+            }
+            for (int b = 0; b < 16; b++)
+            {
+                EEPROM.write((EE_TASK_START + (MEM_TASK_USE * j) + 87 + b), defaultTask[j].mixCnama.charAt(b));
+            }
+            EEPROM.commit();
+        }
+        EEPROM.write(EE_TASK_LEN, dataTaskLen);
+        EEPROM.write(EE_READY_CODE, 0xAA);
+        EEPROM.commit();
+
+        Serial.println("Simpan default value task");
+}
+
+void simpanEnable(uint8_t idx, uint8_t value)
+{
+    EEPROM.write((EE_TASK_START + (idx * MEM_TASK_USE) + 0), value);
+    EEPROM.commit();
+     #ifdef DEBUG_EEPROM
+    Serial.print("Simpan Enable: ");
+    Serial.println(value);
+    #endif
+}
+
+void simpanAktuatorUse1(uint8_t idx, uint8_t nomerAktuator)
+{
+    EEPROM.write(EE_TASK_START + (idx * MEM_TASK_USE) + MEM_AKTUATOR_USE1, nomerAktuator);
+    EEPROM.commit();
+    #ifdef DEBUG_EEPROM
+    Serial.print("Simpan aktuator1: ");
+    Serial.println(nomerAktuator);
+    #endif
+}
+void simpanAktuatorUse2(uint8_t idx, uint8_t nomerAktuator)
+{
+    EEPROM.write(EE_TASK_START + (idx * MEM_TASK_USE) + MEM_AKTUATOR_USE2, nomerAktuator);
+    EEPROM.commit();
+    #ifdef DEBUG_EEPROM
+    Serial.print("Simpan aktuator2: ");
+    Serial.println(nomerAktuator);
+    #endif
+}
+
+void simpanSensorUse1(uint8_t idx, uint8_t nomerSensor)
+{
+    EEPROM.write(EE_TASK_START + (idx * MEM_TASK_USE) + MEM_SENSOR_USE1, nomerSensor);
+    EEPROM.commit();
+    #ifdef DEBUG_EEPROM
+    Serial.print("Simpan sensorUse1: ");
+    Serial.println(nomerSensor);
+    #endif
+}
+
+void simpanSensorUse2(uint8_t idx, uint8_t nomerSensor)
+{
+    EEPROM.write(EE_TASK_START + (idx * MEM_TASK_USE) + MEM_SENSOR_USE2, nomerSensor);
+    EEPROM.commit();
+    #ifdef DEBUG_EEPROM
+    Serial.print("Simpan sensorUse2: ");
+    Serial.println(nomerSensor);
+    #endif
+}
+
+void simpanSensorUse1Type(uint8_t idx, uint8_t nomerSensor)
+{
+    EEPROM.write(EE_TASK_START + (idx * MEM_TASK_USE) + MEM_SENSOR_USE1_TYPE, nomerSensor);
+    EEPROM.commit();
+    #ifdef DEBUG_EEPROM
+    Serial.print("Simpan sensorUse1 type: ");
+    Serial.println(nomerSensor);
+    #endif
+}
+
+void simpanSensorUse2Type(uint8_t idx, uint8_t nomerSensor)
+{
+    EEPROM.write(EE_TASK_START + (idx * MEM_TASK_USE) + MEM_SENSOR_USE2_TYPE, nomerSensor);
+    EEPROM.commit();
+    #ifdef DEBUG_EEPROM
+    Serial.print("Simpan sensorUse2 type: ");
+    Serial.println(nomerSensor);
+    #endif
+}
+
+void simpanTargetBawah(uint8_t idx, uint8_t value)
+{
+    EEPROM.write(EE_TASK_START + (idx * MEM_TASK_USE) + MEM_TARGET_BAWAH, value);
+    EEPROM.commit();
+    #ifdef DEBUG_EEPROM
+    Serial.print("Simpan target Bawah: ");
+    Serial.println(value);
+    #endif
+}
+
+void simpanTargetAtas(uint8_t idx, uint8_t value)
+{
+    EEPROM.write(EE_TASK_START + (idx * MEM_TASK_USE) + MEM_TARGET_ATAS, value);
+    EEPROM.commit();
+     #ifdef DEBUG_EEPROM
+    Serial.print("Simpan target Atas: ");
+    Serial.println(value);
+    #endif
+}
+
+void simpanInverseMode(uint8_t idx, uint8_t value)
+{
+    EEPROM.write(EE_TASK_START + (idx * MEM_TASK_USE) + MEM_INVERSE_MODE, value);
+    EEPROM.commit();
+     #ifdef DEBUG_EEPROM
+    Serial.print("Simpan Inverse mode: ");
+    Serial.println(value);
+    #endif
+}
+
+void simpanAktuatorMixA(uint8_t idx, uint8_t value)
+{
+    EEPROM.write(EE_TASK_START + (idx * MEM_TASK_USE) + MEM_AKTUATOR_MIXA, value);
+    EEPROM.commit();
+     #ifdef DEBUG_EEPROM
+    Serial.print("Simpan aktuator MixA: ");
+    Serial.println(value);
+    #endif
+}
+
+void simpanAktuatorMixB(uint8_t idx, uint8_t value)
+{
+    EEPROM.write(EE_TASK_START + (idx * MEM_TASK_USE) + MEM_AKTUATOR_MIXB, value);
+    EEPROM.commit();
+     #ifdef DEBUG_EEPROM
+    Serial.print("Simpan aktuator MixB: ");
+    Serial.println(value);
+    #endif
+}
+
+void simpanAktuatorMixC(uint8_t idx, uint8_t value)
+{
+    EEPROM.write(EE_TASK_START + (idx * MEM_TASK_USE) + MEM_AKTUATOR_MIXC, value);
+    EEPROM.commit();
+     #ifdef DEBUG_EEPROM
+    Serial.print("Simpan aktuator MixC: ");
+    Serial.println(value);
+    #endif
+}
+void simpanAktuatorAduk(uint8_t idx, uint8_t value)
+{
+    EEPROM.write(EE_TASK_START + (idx * MEM_TASK_USE) + MEM_AKTUATOR_MIXADUK, value);
+    EEPROM.commit();
+     #ifdef DEBUG_EEPROM
+    Serial.print("Simpan aktuator Aduk ");
+    Serial.println(value);
+    #endif
+}
+
+
+void simpanAktuatorMixOut(uint8_t idx, uint8_t value)
+{
+    EEPROM.write(EE_TASK_START + (idx * MEM_TASK_USE) + MEM_AKTUATOR_MIXOUT, value);
+    EEPROM.commit();
+     #ifdef DEBUG_EEPROM
+    Serial.print("Simpan aktuator Mix out: ");
+    Serial.println(value);
+    #endif
+}
+
+void simpanFlowSensorA(uint8_t idx, uint8_t value)
+{
+    EEPROM.write(EE_TASK_START + (idx * MEM_TASK_USE) + MEM_FLOW_SENSORA, value);
+    EEPROM.commit();
+     #ifdef DEBUG_EEPROM
+    Serial.print("Simpan flowsensor A: ");
+    Serial.println(value);
+    #endif
+}
+
+void simpanFlowSensorB(uint8_t idx, uint8_t value)
+{
+    EEPROM.write(EE_TASK_START + (idx * MEM_TASK_USE) + MEM_FLOW_SENSORB, value);
+    EEPROM.commit();
+     #ifdef DEBUG_EEPROM
+    Serial.print("Simpan flowsensor B: ");
+    Serial.println(value);
+    #endif
+}
+
+void simpanFlowSensorC(uint8_t idx, uint8_t value)
+{
+    EEPROM.write(EE_TASK_START + (idx * MEM_TASK_USE) + MEM_FLOW_SENSORC, value);
+    EEPROM.commit();
+     #ifdef DEBUG_EEPROM
+    Serial.print("Simpan flowsensor C: ");
+    Serial.println(value);
+    #endif
+}
+
+void simpanFlowMixOut(uint8_t idx, uint8_t value)
+{
+    EEPROM.write(EE_TASK_START + (idx * MEM_TASK_USE) + MEM_FLOW_MIXOUT, value);
+    EEPROM.commit();
+     #ifdef DEBUG_EEPROM
+    Serial.print("Simpan flowsensor MixOut: ");
+    Serial.println(value);
+    #endif
+}
+
+void simpanTargetMixA(uint8_t idx, uint8_t value)
+{
+    EEPROM.write(EE_TASK_START + (idx * MEM_TASK_USE) + MEM_TARGET_MIXA, value);
+    EEPROM.commit();
+     #ifdef DEBUG_EEPROM
+    Serial.print("Simpan target MixA: ");
+    Serial.println(value);
+    #endif
+}
+
+void simpanTargetMixB(uint8_t idx, uint8_t value)
+{
+    EEPROM.write(EE_TASK_START + (idx * MEM_TASK_USE) + MEM_TARGET_MIXB, value);
+    EEPROM.commit();
+     #ifdef DEBUG_EEPROM
+    Serial.print("Simpan target MixB: ");
+    Serial.println(value);
+    #endif
+}
+
+void simpanTargetMixC(uint8_t idx, uint8_t value)
+{
+    EEPROM.write(EE_TASK_START + (idx * MEM_TASK_USE) + MEM_TARGET_MIXC, value);
+    EEPROM.commit();
+     #ifdef DEBUG_EEPROM
+    Serial.print("Simpan target MixC: ");
+    Serial.println(value);
+    #endif
+}
+
+void simpanTargetMixOut(uint8_t idx, uint8_t value)
+{
+    EEPROM.write(EE_TASK_START + (idx * MEM_TASK_USE) + MEM_TARGET_MIXOUT, value);
+    EEPROM.commit();
+     #ifdef DEBUG_EEPROM
+    Serial.print("Simpan target MixOut: ");
+    Serial.println(value);
+    #endif
+}
+
+void simpanMixANama(String nama,uint8_t idx){
+    int i = 0;
+    if(nama.length() < 16){
+        for(i = 0; i <(16 - nama.length());i++){
+            nama += " ";
+        }
+    }
+    for(i = 0;i < 16;i++){
+        EEPROM.write((EE_TASK_START + (MEM_TASK_USE * idx) + MEM_MIXA_NAMA + i),nama.charAt(i));
     }
     EEPROM.commit();
-    Serial.print("Simpan ke EEPROM Node ");
-    Serial.println(node);
+    Serial.print("Simpan nama MixA: ");
+    Serial.println(nama);
 }
 
-void loadNode(uint8_t node)
-{
-    addr = ((node - 1) * 30) + 1000;
-    for (int i = 0; i < 30; i++)
-    {
-        data[i] = EEPROM.read(addr + i);
-    }
-
-    if (data[0] > 8)
-    {
-        Serial.println("Simpan Node default");
-        // isi default eeprom
-        aktuator1.nodeId = 1;
-        aktuator1.childId = 1;
-        simpanNode(1);
-
-        aktuator2.nodeId = 1;
-        aktuator2.childId = 2;
-        simpanNode(2);
-
-        aktuator3.nodeId = 2;
-        aktuator3.childId = 1;
-        simpanNode(3);
-
-        aktuator4.nodeId = 2;
-        aktuator4.childId = 2;
-        simpanNode(4);
-
-        aktuator5.nodeId = 3;
-        aktuator5.childId = 1;
-        simpanNode(5);
-
-        aktuator6.nodeId = 3;
-        aktuator6.childId = 2;
-        simpanNode(6);
-
-        aktuator7.nodeId = 4;
-        aktuator7.childId = 1;
-        simpanNode(7);
-
-        aktuator8.nodeId = 4;
-        aktuator8.childId = 2;
-        simpanNode(8);
-    }
-    else
-    {
-        switch (node)
-        {
-        case 1:
-            aktuator1.nodeId = data[0];
-            aktuator1.childId = data[1];
-            aktuator1.status = data[2];
-            aktuator1.val = data[3];
-            aktuator1.timeOut = data[4];
-            aktuator1.sensorUseId = data[5];
-            aktuator1.sensorUseChildId = data[6];
-            aktuator1.triggerMin = data[7];
-            aktuator1.triggerMax = data[8];
-            // jadwal
-            for (i = 0; i < 15; i++)
-            {
-                aktuator1.jadwal[i] = data[9 + i];
-            }
-            // last update
-            for (i = 0; i < 6; i++)
-            {
-                aktuator1.lastUpdate[i] = data[24 + i];
-            }
-
-            break;
-
-        case 2:
-            aktuator2.nodeId = data[0];
-            aktuator2.childId = data[1];
-            aktuator2.status = data[2];
-            aktuator2.val = data[3];
-            aktuator2.timeOut = data[4];
-            aktuator2.sensorUseId = data[5];
-            aktuator2.sensorUseChildId = data[6];
-            aktuator2.triggerMin = data[7];
-            aktuator2.triggerMax = data[8];
-            // jadwal
-            for (i = 0; i < 15; i++)
-            {
-                aktuator2.jadwal[i] = data[9 + i];
-            }
-            // last update
-            for (i = 0; i < 6; i++)
-            {
-                aktuator2.lastUpdate[i] = data[24 + i];
-            }
-
-            break;
-
-        case 3:
-            aktuator3.nodeId = data[0];
-            aktuator3.childId = data[1];
-            aktuator3.status = data[2];
-            aktuator3.val = data[3];
-            aktuator3.timeOut = data[4];
-            aktuator3.sensorUseId = data[5];
-            aktuator3.sensorUseChildId = data[6];
-            aktuator3.triggerMin = data[7];
-            aktuator3.triggerMax = data[8];
-            // jadwal
-            for (i = 0; i < 15; i++)
-            {
-                aktuator3.jadwal[i] = data[9 + i];
-            }
-            // last update
-            for (i = 0; i < 6; i++)
-            {
-                aktuator3.lastUpdate[i] = data[24 + i];
-            }
-
-            break;
-
-        case 4:
-            aktuator4.nodeId = data[0];
-            aktuator4.childId = data[1];
-            aktuator4.status = data[2];
-            aktuator4.val = data[3];
-            aktuator4.timeOut = data[4];
-            aktuator4.sensorUseId = data[5];
-            aktuator4.sensorUseChildId = data[6];
-            aktuator4.triggerMin = data[7];
-            aktuator4.triggerMax = data[8];
-            // jadwal
-            for (i = 0; i < 15; i++)
-            {
-                aktuator4.jadwal[i] = data[9 + i];
-            }
-            // last update
-            for (i = 0; i < 6; i++)
-            {
-                aktuator4.lastUpdate[i] = data[24 + i];
-            }
-
-            break;
-
-        case 5:
-            aktuator5.nodeId = data[0];
-            aktuator5.childId = data[1];
-            aktuator5.status = data[2];
-            aktuator5.val = data[3];
-            aktuator5.timeOut = data[4];
-            aktuator5.sensorUseId = data[5];
-            aktuator5.sensorUseChildId = data[6];
-            aktuator5.triggerMin = data[7];
-            aktuator5.triggerMax = data[8];
-            // jadwal
-            for (i = 0; i < 15; i++)
-            {
-                aktuator5.jadwal[i] = data[9 + i];
-            }
-            // last update
-            for (i = 0; i < 6; i++)
-            {
-                aktuator5.lastUpdate[i] = data[24 + i];
-            }
-
-            break;
-
-        case 6:
-            aktuator6.nodeId = data[0];
-            aktuator6.childId = data[1];
-            aktuator6.status = data[2];
-            aktuator6.val = data[3];
-            aktuator6.timeOut = data[4];
-            aktuator6.sensorUseId = data[5];
-            aktuator6.sensorUseChildId = data[6];
-            aktuator6.triggerMin = data[7];
-            aktuator6.triggerMax = data[8];
-            // jadwal
-            for (i = 0; i < 15; i++)
-            {
-                aktuator6.jadwal[i] = data[9 + i];
-            }
-            // last update
-            for (i = 0; i < 6; i++)
-            {
-                aktuator6.lastUpdate[i] = data[24 + i];
-            }
-
-            break;
-
-        case 7:
-            aktuator7.nodeId = data[0];
-            aktuator7.childId = data[1];
-            aktuator7.status = data[2];
-            aktuator7.val = data[3];
-            aktuator7.timeOut = data[4];
-            aktuator7.sensorUseId = data[5];
-            aktuator7.sensorUseChildId = data[6];
-            aktuator7.triggerMin = data[7];
-            aktuator7.triggerMax = data[8];
-            // jadwal
-            for (i = 0; i < 15; i++)
-            {
-                aktuator7.jadwal[i] = data[9 + i];
-            }
-            // last update
-            for (i = 0; i < 6; i++)
-            {
-                aktuator7.lastUpdate[i] = data[24 + i];
-            }
-
-            break;
-
-        case 8:
-            aktuator8.nodeId = data[0];
-            aktuator8.childId = data[1];
-            aktuator8.status = data[2];
-            aktuator8.val = data[3];
-            aktuator8.timeOut = data[4];
-            aktuator8.sensorUseId = data[5];
-            aktuator8.sensorUseChildId = data[6];
-            aktuator8.triggerMin = data[7];
-            aktuator8.triggerMax = data[8];
-            // jadwal
-            for (i = 0; i < 15; i++)
-            {
-                aktuator8.jadwal[i] = data[9 + i];
-            }
-            // last update
-            for (i = 0; i < 6; i++)
-            {
-                aktuator8.lastUpdate[i] = data[24 + i];
-            }
-
-            break;
+void simpanMixBNama(String nama,uint8_t idx){
+    int i = 0;
+    if(nama.length() < 16){
+        for(i = 0; i <(16 - nama.length());i++){
+            nama += " ";
         }
     }
-
-    Serial.print("--------------------------\nLoad node ");
-    Serial.println(node);
-
-    Serial.print("NodeId: ");
-    Serial.println(data[0]);
-    Serial.print("ChildId: ");
-    Serial.println(data[1]);
-    Serial.print("Status: ");
-    Serial.println(data[2]);
-    Serial.print("Val: ");
-    Serial.println(data[3]);
-    Serial.print("SensorUseId: ");
-    Serial.println(data[5]);
-    Serial.print("SensorUseChildId: ");
-    Serial.println(data[6]);
-    Serial.print("TrigerMin: ");
-    Serial.println(data[7]);
-    Serial.print("TrigerMax: ");
-    Serial.println(data[8]);
-    Serial.print("Jadwal: ");
-    Serial.print(data[9]);
-    Serial.print(":");
-    Serial.print(data[10]);
-    Serial.print("-");
-    Serial.print(data[11]);
-    Serial.print("\t");
-    Serial.print(data[12]);
-    Serial.print(":");
-    Serial.print(data[13]);
-    Serial.print("-");
-    Serial.print(data[14]);
-    Serial.print("\t");
-    Serial.print(data[15]);
-    Serial.print(":");
-    Serial.print(data[16]);
-    Serial.print("-");
-    Serial.print(data[17]);
-    Serial.print("\t");
-    Serial.print(data[18]);
-    Serial.print(":");
-    Serial.print(data[19]);
-    Serial.print("-");
-    Serial.print(data[20]);
-    Serial.print("\t");
-    Serial.print(data[21]);
-    Serial.print(":");
-    Serial.print(data[22]);
-    Serial.print("-");
-    Serial.print(data[23]);
-    Serial.print("\t");
-    Serial.print("LastUpdate 20");
-    Serial.print(data[24]);
-    Serial.print("/");
-    Serial.print(data[25]);
-    Serial.print("/");
-    Serial.print(data[26]);
-    Serial.print(" ");
-    Serial.print(data[27]);
-    Serial.print(":");
-    Serial.print(data[28]);
-    Serial.print(":");
-    Serial.println(data[29]);
+    for(i = 0;i < 16;i++){
+        EEPROM.write((EE_TASK_START + (MEM_TASK_USE * idx) + MEM_MIXB_NAMA + i),nama.charAt(i));
+    }
+    EEPROM.commit();
+    Serial.print("Simpan nama MixB: ");
+    Serial.println(nama);
 }
 
-void simpanSensor(uint8_t sensor)
-{
-    switch (sensor)
-    {
-    case 1:
-        data[0] = sensor1.nodeId;
-        data[1] = sensor1.childId1;
-        data[2] = sensor1.childId2;
-        data[3] = sensor1.childId3;
-        data[4] = sensor1.interval;
-        data[5] = sensor1.status;
-        data[6] = sensor1.battLevel;
-        data[7] = sensor1.val1;
-        data[8] = sensor1.val2;
-        data[9] = sensor1.val3;
-
-        data[10] = sensor1.kalMin >> 8;
-        data[11] = sensor1.kalMin & 0x00FF;
-        data[12] = sensor1.kalMax >> 8;
-        data[13] = sensor1.kalMax & 0x00FF;
-
-        // last update
-        for (i = 0; i < 6; i++)
-        {
-            data[14 + i] = sensor1.lastUpdate[i];
-        }
-
-        break;
-
-        case 2:
-        data[0] = sensor2.nodeId;
-        data[1] = sensor2.childId1;
-        data[2] = sensor2.childId2;
-        data[3] = sensor2.childId3;
-        data[4] = sensor2.interval;
-        data[5] = sensor2.status;
-        data[6] = sensor2.battLevel;
-        data[7] = sensor2.val1;
-        data[8] = sensor2.val2;
-        data[9] = sensor2.val3;
-
-        data[10] = sensor2.kalMin >> 8;
-        data[11] = sensor2.kalMin & 0x00FF;
-        data[12] = sensor2.kalMax >> 8;
-        data[13] = sensor2.kalMax & 0x00FF;
-
-        // last update
-        for (i = 0; i < 6; i++)
-        {
-            data[14 + i] = sensor2.lastUpdate[i];
-        }
-
-        break;
-        case 3:
-        data[0] = sensor3.nodeId;
-        data[1] = sensor3.childId1;
-        data[2] = sensor3.childId2;
-        data[3] = sensor3.childId3;
-        data[4] = sensor3.interval;
-        data[5] = sensor3.status;
-        data[6] = sensor3.battLevel;
-        data[7] = sensor3.val1;
-        data[8] = sensor3.val2;
-        data[9] = sensor3.val3;
-
-        data[10] = sensor3.kalMin >> 8;
-        data[11] = sensor3.kalMin & 0x00FF;
-        data[12] = sensor3.kalMax >> 8;
-        data[13] = sensor3.kalMax & 0x00FF;
-
-        // last update
-        for (i = 0; i < 6; i++)
-        {
-            data[14 + i] = sensor3.lastUpdate[i];
-        }
-
-        break;
-        case 4:
-        data[0] = sensor4.nodeId;
-        data[1] = sensor4.childId1;
-        data[2] = sensor4.childId2;
-        data[3] = sensor4.childId3;
-        data[4] = sensor4.interval;
-        data[5] = sensor4.status;
-        data[6] = sensor4.battLevel;
-        data[7] = sensor4.val1;
-        data[8] = sensor4.val2;
-        data[9] = sensor4.val3;
-
-        data[10] = sensor4.kalMin >> 8;
-        data[11] = sensor4.kalMin & 0x00FF;
-        data[12] = sensor4.kalMax >> 8;
-        data[13] = sensor4.kalMax & 0x00FF;
-
-        // last update
-        for (i = 0; i < 6; i++)
-        {
-            data[14 + i] = sensor4.lastUpdate[i];
-        }
-
-        break;
-        case 5:
-        data[0] = sensor5.nodeId;
-        data[1] = sensor5.childId1;
-        data[2] = sensor5.childId2;
-        data[3] = sensor5.childId3;
-        data[4] = sensor5.interval;
-        data[5] = sensor5.status;
-        data[6] = sensor5.battLevel;
-        data[7] = sensor5.val1;
-        data[8] = sensor5.val2;
-        data[9] = sensor5.val3;
-
-        data[10] = sensor5.kalMin >> 8;
-        data[11] = sensor5.kalMin & 0x00FF;
-        data[12] = sensor5.kalMax >> 8;
-        data[13] = sensor5.kalMax & 0x00FF;
-
-        // last update
-        for (i = 0; i < 6; i++)
-        {
-            data[14 + i] = sensor5.lastUpdate[i];
-        }
-
-        break;
-        case 6:
-        data[0] = sensor6.nodeId;
-        data[1] = sensor6.childId1;
-        data[2] = sensor6.childId2;
-        data[3] = sensor6.childId3;
-        data[4] = sensor6.interval;
-        data[5] = sensor6.status;
-        data[6] = sensor6.battLevel;
-        data[7] = sensor6.val1;
-        data[8] = sensor6.val2;
-        data[9] = sensor6.val3;
-
-        data[10] = sensor6.kalMin >> 8;
-        data[11] = sensor6.kalMin & 0x00FF;
-        data[12] = sensor6.kalMax >> 8;
-        data[13] = sensor6.kalMax & 0x00FF;
-
-        // last update
-        for (i = 0; i < 6; i++)
-        {
-            data[14 + i] = sensor6.lastUpdate[i];
-        }
-
-        break;
-        case 7:
-        data[0] = sensor7.nodeId;
-        data[1] = sensor7.childId1;
-        data[2] = sensor7.childId2;
-        data[3] = sensor7.childId3;
-        data[4] = sensor7.interval;
-        data[5] = sensor7.status;
-        data[6] = sensor7.battLevel;
-        data[7] = sensor7.val1;
-        data[8] = sensor7.val2;
-        data[9] = sensor7.val3;
-
-        data[10] = sensor7.kalMin >> 8;
-        data[11] = sensor7.kalMin & 0x00FF;
-        data[12] = sensor7.kalMax >> 8;
-        data[13] = sensor7.kalMax & 0x00FF;
-
-        // last update
-        for (i = 0; i < 6; i++)
-        {
-            data[14 + i] = sensor7.lastUpdate[i];
-        }
-
-        break;
-        case 8:
-        data[0] = sensor8.nodeId;
-        data[1] = sensor8.childId1;
-        data[2] = sensor8.childId2;
-        data[3] = sensor8.childId3;
-        data[4] = sensor8.interval;
-        data[5] = sensor8.status;
-        data[6] = sensor8.battLevel;
-        data[7] = sensor8.val1;
-        data[8] = sensor8.val2;
-        data[9] = sensor8.val3;
-
-        data[10] = sensor8.kalMin >> 8;
-        data[11] = sensor8.kalMin & 0x00FF;
-        data[12] = sensor8.kalMax >> 8;
-        data[13] = sensor8.kalMax & 0x00FF;
-
-        // last update
-        for (i = 0; i < 6; i++)
-        {
-            data[14 + i] = sensor8.lastUpdate[i];
-        }
-
-        break;
-    }
-}
-
-void loadSensor(uint8_t sensor)
-{
-    addr = ((sensor - 1) * 30) + 1500;
-    for (int i = 0; i < 20; i++)
-    {
-        data[i] = EEPROM.read(addr + i);
-    }
-
-    if (data[0] > 65)
-    {
-        Serial.println("Simpan Sensor default");
-        // isi default eeprom
-        // lengas 1
-        sensor1.nodeId = 51;
-        simpanSensor(1);
-
-        // lengas 2
-        sensor2.nodeId = 52;
-        simpanSensor(2);
-
-        // lengas 3
-        sensor3.nodeId = 53;
-        simpanSensor(3);
-
-        // lengas 4
-        sensor4.nodeId = 54;
-        simpanSensor(4);
-
-        // sht22
-        sensor5.nodeId = 60;
-        sensor5.childId1 = 0;
-        sensor5.childId2 = 1;
-        sensor5.childId3 = 3;
-        simpanSensor(5);
-
-        // sht22
-        sensor6.nodeId = 61;
-        sensor6.childId1 = 0;
-        sensor6.childId2 = 1;
-        sensor6.childId3 = 3;
-        simpanSensor(6);
-
-        // npk
-        sensor7.nodeId = 62;
-        sensor7.childId1 = 0;
-        sensor7.childId2 = 1;
-        sensor7.childId3 = 3;
-        simpanSensor(7);
-
-        //  flow sensor
-        sensor8.nodeId = 63;
-        sensor8.childId1 = 0;
-        sensor8.childId2 = 1;
-        sensor8.childId3 = 3;
-        simpanSensor(8);
-    }
-    else
-    {
-        switch (sensor)
-        {
-        case 1:
-            sensor1.nodeId = data[0];
-            sensor1.childId1 = data[1];
-            sensor1.childId2 = data[2];
-            sensor1.childId3 = data[3];
-            sensor1.interval = data[4];
-            sensor1.status = data[5];
-            sensor1.battLevel = data[6];
-            sensor1.val1 = data[7];
-            sensor1.val2 = data[8];
-            sensor1.val3 = data[9];
-            kal = (data[10] * 256) + data[11];
-            sensor1.kalMin = kal;
-            kal = (data[12] * 256) + data[13];
-            sensor1.kalMax = kal;
-            // last update
-            for (i = 0; i < 6; i++)
-            {
-                sensor1.lastUpdate[i] = data[14 + i];
-            }
-
-            break;
-
-        case 2:
-            sensor2.nodeId = data[0];
-            sensor2.childId1 = data[1];
-            sensor2.childId2 = data[2];
-            sensor2.childId3 = data[3];
-            sensor2.interval = data[4];
-            sensor2.status = data[5];
-            sensor2.battLevel = data[6];
-            sensor2.val1 = data[7];
-            sensor2.val2 = data[8];
-            sensor2.val3 = data[9];
-            kal = (data[10] * 256) + data[11];
-            sensor2.kalMin = kal;
-            kal = (data[12] * 256) + data[13];
-            sensor2.kalMax = kal;
-            // last update
-            for (i = 0; i < 6; i++)
-            {
-                sensor2.lastUpdate[i] = data[14 + i];
-            }
-
-            break;
-        case 3:
-            sensor3.nodeId = data[0];
-            sensor3.childId1 = data[1];
-            sensor3.childId2 = data[2];
-            sensor3.childId3 = data[3];
-            sensor3.interval = data[4];
-            sensor3.status = data[5];
-            sensor3.battLevel = data[6];
-            sensor3.val1 = data[7];
-            sensor3.val2 = data[8];
-            sensor3.val3 = data[9];
-            kal = (data[10] * 256) + data[11];
-            sensor3.kalMin = kal;
-            kal = (data[12] * 256) + data[13];
-            sensor3.kalMax = kal;
-            // last update
-            for (i = 0; i < 6; i++)
-            {
-                sensor3.lastUpdate[i] = data[14 + i];
-            }
-
-            break;
-        case 4:
-            sensor4.nodeId = data[0];
-            sensor4.childId1 = data[1];
-            sensor4.childId2 = data[2];
-            sensor4.childId3 = data[3];
-            sensor4.interval = data[4];
-            sensor4.status = data[5];
-            sensor4.battLevel = data[6];
-            sensor4.val1 = data[7];
-            sensor4.val2 = data[8];
-            sensor4.val3 = data[9];
-            kal = (data[10] * 256) + data[11];
-            sensor4.kalMin = kal;
-            kal = (data[12] * 256) + data[13];
-            sensor4.kalMax = kal;
-            // last update
-            for (i = 0; i < 6; i++)
-            {
-                sensor4.lastUpdate[i] = data[14 + i];
-            }
-
-            break;
-        case 5:
-            sensor5.nodeId = data[0];
-            sensor5.childId1 = data[1];
-            sensor5.childId2 = data[2];
-            sensor5.childId3 = data[3];
-            sensor5.interval = data[4];
-            sensor5.status = data[5];
-            sensor5.battLevel = data[6];
-            sensor5.val1 = data[7];
-            sensor5.val2 = data[8];
-            sensor5.val3 = data[9];
-            kal = (data[10] * 256) + data[11];
-            sensor5.kalMin = kal;
-            kal = (data[12] * 256) + data[13];
-            sensor5.kalMax = kal;
-            // last update
-            for (i = 0; i < 6; i++)
-            {
-                sensor5.lastUpdate[i] = data[14 + i];
-            }
-
-            break;
-        case 6:
-            sensor6.nodeId = data[0];
-            sensor6.childId1 = data[1];
-            sensor6.childId2 = data[2];
-            sensor6.childId3 = data[3];
-            sensor6.interval = data[4];
-            sensor6.status = data[5];
-            sensor6.battLevel = data[6];
-            sensor6.val1 = data[7];
-            sensor6.val2 = data[8];
-            sensor6.val3 = data[9];
-            kal = (data[10] * 256) + data[11];
-            sensor6.kalMin = kal;
-            kal = (data[12] * 256) + data[13];
-            sensor6.kalMax = kal;
-            // last update
-            for (i = 0; i < 6; i++)
-            {
-                sensor6.lastUpdate[i] = data[14 + i];
-            }
-
-            break;
-        case 7:
-            sensor7.nodeId = data[0];
-            sensor7.childId1 = data[1];
-            sensor7.childId2 = data[2];
-            sensor7.childId3 = data[3];
-            sensor7.interval = data[4];
-            sensor7.status = data[5];
-            sensor7.battLevel = data[6];
-            sensor7.val1 = data[7];
-            sensor7.val2 = data[8];
-            sensor7.val3 = data[9];
-            kal = (data[10] * 256) + data[11];
-            sensor7.kalMin = kal;
-            kal = (data[12] * 256) + data[13];
-            sensor7.kalMax = kal;
-            // last update
-            for (i = 0; i < 6; i++)
-            {
-                sensor7.lastUpdate[i] = data[14 + i];
-            }
-
-            break;
-        case 8:
-            sensor8.nodeId = data[0];
-            sensor8.childId1 = data[1];
-            sensor8.childId2 = data[2];
-            sensor8.childId3 = data[3];
-            sensor8.interval = data[4];
-            sensor8.status = data[5];
-            sensor8.battLevel = data[6];
-            sensor8.val1 = data[7];
-            sensor8.val2 = data[8];
-            sensor8.val3 = data[9];
-            kal = (data[10] * 256) + data[11];
-            sensor8.kalMin = kal;
-            kal = (data[12] * 256) + data[13];
-            sensor8.kalMax = kal;
-            // last update
-            for (i = 0; i < 6; i++)
-            {
-                sensor8.lastUpdate[i] = data[14 + i];
-            }
-
-            break;
+void simpanMixCNama(String nama,uint8_t idx){
+    int i = 0;
+    if(nama.length() < 16){
+        for(i = 0; i <(16 - nama.length());i++){
+            nama += " ";
         }
     }
-
-     Serial.print("--------------------------\nLoad sensor ");
-    Serial.println(sensor);
-
-    Serial.print("NodeId: ");
-    Serial.println(data[0]);
-    Serial.print("ChildId1: ");
-    Serial.println(data[1]);
-    Serial.print("ChildId2: ");
-    Serial.println(data[2]);
-    Serial.print("ChildId3: ");
-    Serial.println(data[3]);
-    Serial.print("interval: ");
-    Serial.println(data[4]);
-    Serial.print("Status: ");
-    Serial.println(data[5]);    
-    Serial.print("Batt Leval: ");
-    Serial.println(data[6]);
-    Serial.print("Val1: ");
-    Serial.println(data[7]);
-    Serial.print("Val2: ");
-    Serial.println(data[8]);
-    Serial.print("Val3: ");
-    Serial.println(data[9]);
-    kal = (data[10] * 256 ) + data[11];
-    Serial.print("Kal Min: ");
-    Serial.println(kal);
-    kal = (data[12] * 256 ) + data[13];
-    Serial.print("Kal Max: ");
-    Serial.println(kal);
-    Serial.print("LastUpdate 20");
-    Serial.print(data[14]);
-    Serial.print("/");
-    Serial.print(data[15]);
-    Serial.print("/");
-    Serial.println(data[16]);
-    Serial.print(" ");
-    Serial.print(data[17]);
-    Serial.print(":");
-    Serial.print(data[18]);
-    Serial.print(":");
-    Serial.println(data[19]);
+    for(i = 0;i < 16;i++){
+        EEPROM.write((EE_TASK_START + (MEM_TASK_USE * idx) + MEM_MIXC_NAMA + i),nama.charAt(i));
+    }
+    EEPROM.commit();
+    Serial.print("Simpan nama MixC: ");
+    Serial.println(nama);
 }
